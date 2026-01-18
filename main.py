@@ -16,12 +16,21 @@ def get_weather():
     response = requests.get(url)
     data = response.json()
     
+    # [수정된 부분] API 호출이 성공했는지 확인
+    if response.status_code != 200:
+        print(f"🚨 날씨 API 호출 실패! 응답 코드: {response.status_code}")
+        print(f"상세 에러 메시지: {data}")
+        # 에러가 나면 프로그램을 여기서 강제로 종료하고 메시지를 보냄
+        raise Exception(f"날씨 정보를 가져오지 못했습니다: {data.get('message', '알 수 없는 오류')}")
+
     # 정보 추출
-    temp = data['main']['temp'] # 현재 기온
-    weather_desc = data['weather'][0]['description'] # 날씨 설명 (맑음, 구름 등)
-    weather_id = data['weather'][0]['id'] # 날씨 상태 코드 (비, 눈 등 확인용)
-    
-    return temp, weather_desc, weather_id
+    try:
+        temp = data['main']['temp'] # 현재 기온
+        weather_desc = data['weather'][0]['description'] # 날씨 설명
+        weather_id = data['weather'][0]['id'] # 날씨 상태 코드
+        return temp, weather_desc, weather_id
+    except KeyError:
+        raise Exception(f"데이터 형식이 예상과 다릅니다: {data}")
 
 def get_outfit(temp):
     # 당신의 입맛에 맞게 온도를 조절하려면 여기 숫자를 바꾸세요!
@@ -41,7 +50,6 @@ def get_outfit(temp):
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
 
 def get_umbrella(weather_id):
-    # 날씨 코드가 2xx(뇌우), 3xx(이슬비), 5xx(비), 6xx(눈) 인 경우
     if 200 <= weather_id < 700:
         return "\n☂️ 비나 눈 소식이 있어요. 우산을 꼭 챙기세요!"
     return "\n☀️ 우산은 필요 없을 것 같아요."
@@ -52,11 +60,16 @@ def send_telegram(message):
         'chat_id': chat_id,
         'text': message
     }
-    requests.post(url, json=payload)
+    response = requests.post(url, json=payload)
+    if response.status_code != 200:
+        print(f"텔레그램 전송 실패: {response.text}")
 
 if __name__ == "__main__":
     try:
+        print("날씨 정보 요청 중...")
         temp, desc, w_id = get_weather()
+        
+        print(f"정보 수신 성공: {temp}도, {desc}")
         outfit = get_outfit(temp)
         umbrella = get_umbrella(w_id)
         
@@ -72,4 +85,6 @@ if __name__ == "__main__":
         print("메시지 전송 완료")
         
     except Exception as e:
-        print(f"에러 발생: {e}")
+        print(f"❌ 에러 발생: {e}")
+        # 실패했다는 것을 깃허브에 알림
+        exit(1)
