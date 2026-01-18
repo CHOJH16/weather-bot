@@ -2,38 +2,35 @@ import requests
 import os
 from datetime import datetime
 
-# 1. 텔레그램 정보만 가져오기 (날씨 키는 필요 없음!)
+# 1. 깃허브 시크릿에서 정보 가져오기
 bot_token = os.environ.get('TELEGRAM_TOKEN')
 chat_id = os.environ.get('CHAT_ID')
+weather_key = os.environ.get('WEATHER_KEY')
 
-# 서울의 위도, 경도
+# 서울의 위도, 경도 (OpenWeatherMap 기준)
 lat = 37.5665
 lon = 126.9780
 
 def get_weather():
-    # Open-Meteo API 호출 (키 없이 무료 사용 가능)
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&timezone=Asia%2FSeoul"
+    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={weather_key}&units=metric&lang=kr"
     response = requests.get(url)
     data = response.json()
     
-    # 정보 추출
-    current = data['current_weather']
-    temp = current['temperature'] # 현재 기온
-    w_code = current['weathercode'] # 날씨 코드 (WMO 기준)
-    
-    return temp, w_code
+    # [수정된 부분] API 호출이 성공했는지 확인
+    if response.status_code != 200:
+        print(f"🚨 날씨 API 호출 실패! 응답 코드: {response.status_code}")
+        print(f"상세 에러 메시지: {data}")
+        # 에러가 나면 프로그램을 여기서 강제로 종료하고 메시지를 보냄
+        raise Exception(f"날씨 정보를 가져오지 못했습니다: {data.get('message', '알 수 없는 오류')}")
 
-def get_weather_desc(w_code):
-    # WMO 날씨 코드를 한글 설명으로 변환
-    if w_code == 0: return "맑음 ☀️"
-    elif 1 <= w_code <= 3: return "구름 조금/흐림 ☁️"
-    elif 45 <= w_code <= 48: return "안개 🌫️"
-    elif 51 <= w_code <= 67: return "비/이슬비 🌧️"
-    elif 71 <= w_code <= 77: return "눈 ❄️"
-    elif 80 <= w_code <= 82: return "소나기 ☔"
-    elif 85 <= w_code <= 86: return "눈보라 ☃️"
-    elif 95 <= w_code <= 99: return "뇌우(천둥번개) ⚡"
-    else: return "정보 없음"
+    # 정보 추출
+    try:
+        temp = data['main']['temp'] # 현재 기온
+        weather_desc = data['weather'][0]['description'] # 날씨 설명
+        weather_id = data['weather'][0]['id'] # 날씨 상태 코드
+        return temp, weather_desc, weather_id
+    except KeyError:
+        raise Exception(f"데이터 형식이 예상과 다릅니다: {data}")
 
 def get_outfit(temp):
     if temp >= 30:
@@ -51,9 +48,8 @@ def get_outfit(temp):
     else:
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
 
-def get_umbrella(w_code):
-    # 비(51~67), 눈(71~77), 소나기(80~82), 뇌우(95~99) 인 경우
-    if w_code >= 50:
+def get_umbrella(weather_id):
+    if 200 <= weather_id < 700:
         return "\n☂️ 비나 눈 소식이 있어요. 우산을 꼭 챙기세요!"
     return "\n☀️ 우산은 필요 없을 것 같아요."
 
@@ -69,14 +65,12 @@ def send_telegram(message):
 
 if __name__ == "__main__":
     try:
-        print("날씨 정보 요청 중 (Open-Meteo)...")
-        temp, w_code = get_weather()
-        desc = get_weather_desc(w_code)
+        print("날씨 정보 요청 중...")
+        temp, desc, w_id = get_weather()
         
-        print(f"정보 수신 성공: {temp}도, 코드 {w_code}")
-        
+        print(f"정보 수신 성공: {temp}도, {desc}")
         outfit = get_outfit(temp)
-        umbrella = get_umbrella(w_code)
+        umbrella = get_umbrella(w_id)
         
         today_date = datetime.now().strftime("%m월 %d일")
         
@@ -91,4 +85,5 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"❌ 에러 발생: {e}")
+        # 실패했다는 것을 깃허브에 알림
         exit(1)
