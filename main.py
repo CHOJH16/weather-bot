@@ -2,7 +2,7 @@ import requests
 import os
 from datetime import datetime
 
-# 1. 텔레그램 정보만 가져오기 (날씨 키는 필요 없음!)
+# 1. 텔레그램 정보 가져오기
 bot_token = os.environ.get('TELEGRAM_TOKEN')
 chat_id = os.environ.get('CHAT_ID')
 
@@ -11,20 +11,24 @@ lat = 37.5665
 lon = 126.9780
 
 def get_weather():
-    # Open-Meteo API 호출 (키 없이 무료 사용 가능)
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&timezone=Asia%2FSeoul"
+    # [수정됨] daily=temperature_2m_max,temperature_2m_min 옵션을 추가해서 최저/최고 기온을 받아옵니다.
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul"
     response = requests.get(url)
     data = response.json()
     
-    # 정보 추출
+    # 1. 현재 날씨 정보
     current = data['current_weather']
-    temp = current['temperature'] # 현재 기온
-    w_code = current['weathercode'] # 날씨 코드 (WMO 기준)
+    temp_now = current['temperature'] # 현재 기온
+    w_code = current['weathercode'] # 날씨 코드
     
-    return temp, w_code
+    # 2. 오늘 하루 최저/최고 기온 (오늘 날짜는 리스트의 0번째에 들어있음)
+    daily = data['daily']
+    temp_max = daily['temperature_2m_max'][0] # 오늘 최고 기온
+    temp_min = daily['temperature_2m_min'][0] # 오늘 최저 기온
+    
+    return temp_now, temp_min, temp_max, w_code
 
 def get_weather_desc(w_code):
-    # WMO 날씨 코드를 한글 설명으로 변환
     if w_code == 0: return "맑음 ☀️"
     elif 1 <= w_code <= 3: return "구름 조금/흐림 ☁️"
     elif 45 <= w_code <= 48: return "안개 🌫️"
@@ -36,6 +40,9 @@ def get_weather_desc(w_code):
     else: return "정보 없음"
 
 def get_outfit(temp):
+    # 옷차림은 '현재 기온'을 기준으로 할지, '최고 기온'을 기준으로 할지 고민되시죠?
+    # 보통 아침 7시엔 춥더라도 낮 기온을 고려하는 게 좋지만, 
+    # 일단 직관적으로 '현재 기온' 기준으로 추천해 드립니다.
     if temp >= 30:
         return "🔥 찜통더위! 민소매, 반바지, 린넨 옷 추천. 손풍기 필수!"
     elif 25 <= temp < 30:
@@ -52,7 +59,6 @@ def get_outfit(temp):
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
 
 def get_umbrella(w_code):
-    # 비(51~67), 눈(71~77), 소나기(80~82), 뇌우(95~99) 인 경우
     if w_code >= 50:
         return "\n☂️ 비나 눈 소식이 있어요. 우산을 꼭 챙기세요!"
     return "\n☀️ 우산은 필요 없을 것 같아요."
@@ -63,25 +69,21 @@ def send_telegram(message):
         'chat_id': chat_id,
         'text': message
     }
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print(f"텔레그램 전송 실패: {response.text}")
+    requests.post(url, json=payload)
 
 if __name__ == "__main__":
     try:
-        print("날씨 정보 요청 중 (Open-Meteo)...")
-        temp, w_code = get_weather()
+        temp_now, temp_min, temp_max, w_code = get_weather()
         desc = get_weather_desc(w_code)
-        
-        print(f"정보 수신 성공: {temp}도, 코드 {w_code}")
-        
-        outfit = get_outfit(temp)
+        outfit = get_outfit(temp_now)
         umbrella = get_umbrella(w_code)
         
         today_date = datetime.now().strftime("%m월 %d일")
         
+        # [수정됨] 메시지 내용에 최저/최고 기온 추가
         message = f"[{today_date} 아침 날씨 알림]\n\n"
-        message += f"📍 서울 기온: {temp}°C\n"
+        message += f"📍 서울 현재: {temp_now}°C\n"
+        message += f"📉 최저: {temp_min}°C / 📈 최고: {temp_max}°C\n"
         message += f"☁️ 날씨 상태: {desc}\n\n"
         message += f"👗 옷차림 추천:\n{outfit}\n"
         message += f"{umbrella}"
