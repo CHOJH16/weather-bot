@@ -1,0 +1,33 @@
+name: Daily Weather Bot
+
+on:
+  schedule:
+    # UTC 기준 22:00는 한국 시간(KST)으로 다음날 오전 07:00입니다.
+    - cron: '0 22 * * *'
+  # 수동으로 테스트해볼 수 있게 해주는 버튼
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 저장소 코드 가져오기
+      uses: actions/checkout@v3
+
+    - name: 파이썬 설정하기
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: 필요한 라이브러리 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: 날씨 봇 실행
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+        WEATHER_KEY: ${{ secrets.WEATHER_KEY }}
+      run: python main.py
