@@ -2,9 +2,11 @@ name: Daily Weather Bot
 
 on:
   schedule:
-    # UTC 기준 22:00는 한국 시간(KST)으로 다음날 오전 07:00입니다.
-    - cron: '0 22 * * *'
-  # 수동으로 테스트해볼 수 있게 해주는 버튼
+    # 영국 시간 21:01 = 한국 시간 다음날 아침 06:01
+    # 정각(00분)보다 1분 늦게 설정하면 서버가 덜 붐벼서 실행이 더 빠를 수 있습니다.
+    - cron: '1 21 * * *'
+  
+  # 수동 실행 버튼 (테스트용)
   workflow_dispatch:
 
 jobs:
@@ -29,5 +31,5 @@ jobs:
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-        WEATHER_KEY: ${{ secrets.WEATHER_KEY }}
+        # 날씨 키는 이제 안 쓰지만, 에러 방지를 위해 남겨둬도 상관없습니다.
       run: python main.py
