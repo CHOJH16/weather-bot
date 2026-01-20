@@ -1,30 +1,61 @@
 import requests
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timedelta, timezone
 
 # 1. 텔레그램 정보 가져오기
 bot_token = os.environ.get('TELEGRAM_TOKEN')
-chat_id = os.environ.get('CHAT_ID')
+chat_ids_raw = os.environ.get('CHAT_ID')
+
+# ID가 하나든 여러 개든(쉼표) 알아서 처리
+if chat_ids_raw:
+    chat_ids = chat_ids_raw.split(',')
+else:
+    chat_ids = []
 
 # 서울의 위도, 경도
 lat = 37.5665
 lon = 126.9780
 
+# ---------------------------------------------------------
+# [대기 기능] 목표 시간까지 기다리는 함수
+# ---------------------------------------------------------
+def wait_until_target_time(target_hour, target_minute):
+    # 한국 시간(KST) 기준
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
+    
+    # 오늘의 목표 시간 (아침 6시 30분 00초)
+    target_time = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    
+    # 현재 시간이 목표 시간보다 전이면 (예: 6시 05분 -> 6시 30분까지 대기)
+    if now < target_time:
+        wait_seconds = (target_time - now).total_seconds()
+        print(f"⏰ 현재 시간(KST): {now.strftime('%H:%M:%S')}")
+        print(f"🎯 목표 시간(KST): {target_time.strftime('%H:%M:%S')}")
+        print(f"⏳ 약 {wait_seconds / 60:.1f}분 동안 대기합니다...")
+        
+        time.sleep(wait_seconds)
+        print("🚀 대기 종료! 메시지를 전송합니다.")
+    else:
+        print("⚠️ 이미 목표 시간이 지났습니다. 즉시 실행합니다.")
+
+# ---------------------------------------------------------
+# 날씨 및 메시지 로직
+# ---------------------------------------------------------
 def get_weather():
-    # [수정됨] daily=temperature_2m_max,temperature_2m_min 옵션을 추가해서 최저/최고 기온을 받아옵니다.
+    # Open-Meteo (무료, 키 불필요)
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul"
     response = requests.get(url)
     data = response.json()
     
-    # 1. 현재 날씨 정보
     current = data['current_weather']
-    temp_now = current['temperature'] # 현재 기온
-    w_code = current['weathercode'] # 날씨 코드
+    temp_now = current['temperature']
+    w_code = current['weathercode']
     
-    # 2. 오늘 하루 최저/최고 기온 (오늘 날짜는 리스트의 0번째에 들어있음)
     daily = data['daily']
-    temp_max = daily['temperature_2m_max'][0] # 오늘 최고 기온
-    temp_min = daily['temperature_2m_min'][0] # 오늘 최저 기온
+    temp_max = daily['temperature_2m_max'][0]
+    temp_min = daily['temperature_2m_min'][0]
     
     return temp_now, temp_min, temp_max, w_code
 
@@ -40,20 +71,19 @@ def get_weather_desc(w_code):
     else: return "정보 없음"
 
 def get_outfit(temp):
-    # 옷차림은 '현재 기온'을 기준으로 할지, '최고 기온'을 기준으로 할지 고민되시죠?
-    # 보통 아침 7시엔 춥더라도 낮 기온을 고려하는 게 좋지만, 
-    # 일단 직관적으로 '현재 기온' 기준으로 추천해 드립니다.
-    if temp >= 30:
+    if temp >= 28:
         return "🔥 찜통더위! 민소매, 반바지, 린넨 옷 추천. 손풍기 필수!"
-    elif 25 <= temp < 30:
+    elif 23 <= temp < 28:
         return "☀️ 덥습니다. 반팔, 얇은 셔츠, 반바지 추천."
-    elif 15 <= temp < 25:
+    elif 20 <= temp < 23:
         return "🌤 활동하기 좋아요. 얇은 가디건, 긴팔, 면바지 추천."
-    elif 8 <= temp < 15:
+    elif 17 <= temp < 20:
         return "🍂 선선해요. 얇은 니트, 맨투맨, 가디건 챙기세요."
-    elif 2 <= temp < 8:
+    elif 12 <= temp < 17:
         return "🧥 쌀쌀합니다. 자켓, 야상, 스타킹, 도톰한 바지 입으세요."
-    elif -3 <= temp < 2:
+    elif 9 <= temp < 12:
+        return "🧥 트렌치코트, 야상, 점퍼 필수! 감기 조심하세요."
+    elif 5 <= temp < 9:
         return "🥶 춥습니다. 코트, 히트텍, 니트, 레깅스 추천."
     else:
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
@@ -64,23 +94,31 @@ def get_umbrella(w_code):
     return "\n☀️ 우산은 필요 없을 것 같아요."
 
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': message
-    }
-    requests.post(url, json=payload)
+    for chat_id in chat_ids:
+        clean_id = chat_id.strip()
+        if not clean_id: continue
+        
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            'chat_id': clean_id,
+            'text': message
+        }
+        requests.post(url, json=payload)
 
 if __name__ == "__main__":
     try:
+        # 1. 6시 30분이 될 때까지 대기
+        wait_until_target_time(6, 30)
+
+        # 2. 날씨 정보 가져오기
         temp_now, temp_min, temp_max, w_code = get_weather()
         desc = get_weather_desc(w_code)
         outfit = get_outfit(temp_now)
         umbrella = get_umbrella(w_code)
         
-        today_date = datetime.now().strftime("%m월 %d일")
+        # 3. 메시지 만들기
+        today_date = datetime.now(timezone(timedelta(hours=9))).strftime("%m월 %d일")
         
-        # [수정됨] 메시지 내용에 최저/최고 기온 추가
         message = f"[{today_date} 아침 날씨 알림]\n\n"
         message += f"📍 서울 현재: {temp_now}°C\n"
         message += f"📉 최저: {temp_min}°C / 📈 최고: {temp_max}°C\n"
@@ -88,6 +126,7 @@ if __name__ == "__main__":
         message += f"👗 옷차림 추천:\n{outfit}\n"
         message += f"{umbrella}"
         
+        # 4. 전송
         send_telegram(message)
         print("메시지 전송 완료")
         
