@@ -2,16 +2,18 @@ name: Daily Weather Bot
 
 on:
   schedule:
-    # 영국 시간 21:01 = 한국 시간 다음날 아침 06:01
-    # 정각(00분)보다 1분 늦게 설정하면 서버가 덜 붐벼서 실행이 더 빠를 수 있습니다.
-    - cron: '1 21 * * *'
+    # 영국 시간 21:00 = 한국 시간 다음날 아침 06:00
+    # 6시에 봇을 깨워서 준비시킵니다.
+    - cron: '0 21 * * *'
   
-  # 수동 실행 버튼 (테스트용)
+  # 수동 실행 버튼
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 대기 시간이 약 30분이므로, 실행 제한 시간을 60분으로 설정 (안전빵)
+    timeout-minutes: 60
 
     steps:
     - name: 저장소 코드 가져오기
@@ -31,5 +33,4 @@ jobs:
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-        # 날씨 키는 이제 안 쓰지만, 에러 방지를 위해 남겨둬도 상관없습니다.
       run: python main.py
