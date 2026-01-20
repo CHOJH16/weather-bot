@@ -71,19 +71,17 @@ def get_weather_desc(w_code):
     else: return "정보 없음"
 
 def get_outfit(temp):
-    if temp >= 28:
+    if temp >= 30:
         return "🔥 찜통더위! 민소매, 반바지, 린넨 옷 추천. 손풍기 필수!"
-    elif 23 <= temp < 28:
+    elif 21 <= temp < 30:
         return "☀️ 덥습니다. 반팔, 얇은 셔츠, 반바지 추천."
-    elif 20 <= temp < 23:
+    elif 16 <= temp < 21:
         return "🌤 활동하기 좋아요. 얇은 가디건, 긴팔, 면바지 추천."
-    elif 17 <= temp < 20:
+    elif 10 <= temp < 16:
         return "🍂 선선해요. 얇은 니트, 맨투맨, 가디건 챙기세요."
-    elif 12 <= temp < 17:
+    elif 5 <= temp < 10:
         return "🧥 쌀쌀합니다. 자켓, 야상, 스타킹, 도톰한 바지 입으세요."
-    elif 9 <= temp < 12:
-        return "🧥 트렌치코트, 야상, 점퍼 필수! 감기 조심하세요."
-    elif 5 <= temp < 9:
+    elif -3 <= temp < 5:
         return "🥶 춥습니다. 코트, 히트텍, 니트, 레깅스 추천."
     else:
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
