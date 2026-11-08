@@ -2,9 +2,9 @@ name: Daily Weather Bot
 
 on:
   schedule:
-    # 영국 시간 21:00 = 한국 시간 다음날 아침 06:00
-    # 6시에 봇을 깨워서 준비시킵니다.
-    - cron: '0 21 * * *'
+    # [팁] 정각(0 21)은 전 세계 트래픽이 몰려 몇 시간씩 지연됩니다.
+    # 한국 시간 새벽 5시 47분(영국 시간 20:47)처럼 애매한 시간으로 설정하면 칼같이 실행됩니다!
+    - cron: '47 20 * * *'
   
   # 수동 실행 버튼
   workflow_dispatch:
@@ -12,17 +12,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 대기 시간이 약 30분이므로, 실행 제한 시간을 60분으로 설정 (안전빵)
+    # 대기 시간을 고려해 실행 제한 시간을 60분으로 설정
     timeout-minutes: 60
 
     steps:
     - name: 저장소 코드 가져오기
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # v3 -> 최신 버전으로 업그레이드
 
     - name: 파이썬 설정하기
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5  # v4 -> 최신 버전으로 업그레이드
       with:
-        python-version: '3.9'
+        python-version: '3.12'  # Ubuntu 26.04에서 완벽 지원하는 최신 안정화 버전으로 변경
 
     - name: 필요한 라이브러리 설치
       run: |
