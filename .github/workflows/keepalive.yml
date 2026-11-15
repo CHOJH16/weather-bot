@@ -1,22 +1,41 @@
-name: Keepalive
+name: Daily Weather Bot
 
 on:
   schedule:
-    - cron: '0 0 */20 * *'   # 20일마다 실행
+    # UTC 20:47 = 한국 시간 다음 날 오전 5:47
+    # 일찍 시작하면 main.py에서 한국 시간 오전 6:30까지 대기합니다.
+    # GitHub 예약 실행은 지연될 수 있습니다.
+    - cron: '47 20 * * *'
+
+  # GitHub Actions에서 수동 실행할 수 있도록 설정
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  keepalive:
+  build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Empty commit to keep repo active
+    # 오전 6:30까지 기다리는 시간을 포함한 실행 제한
+    timeout-minutes: 60
+
+    steps:
+      - name: 저장소 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설정하기
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 필요한 라이브러리 설치
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "keepalive: keep scheduled workflows active"
-          git push
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: 날씨 봇 실행
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python -u main.py
