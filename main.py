@@ -1,133 +1,335 @@
-import requests
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-# 1. 텔레그램 정보 가져오기
-bot_token = os.environ.get('TELEGRAM_TOKEN')
-chat_ids_raw = os.environ.get('CHAT_ID')
+import requests
 
-# ID가 하나든 여러 개든(쉼표) 알아서 처리
-if chat_ids_raw:
-    chat_ids = chat_ids_raw.split(',')
-else:
-    chat_ids = []
 
-# 서울의 위도, 경도
+# ---------------------------------------------------------
+# 기본 설정
+# ---------------------------------------------------------
+KST = timezone(timedelta(hours=9))
+
+# GitHub Secrets에 등록된 기존 값을 그대로 사용합니다.
+bot_token = (os.environ.get("TELEGRAM_TOKEN") or "").strip()
+chat_ids_raw = os.environ.get("CHAT_ID") or ""
+
+# 쉼표로 구분한 여러 수신자를 지원합니다.
+# 중복된 ID는 한 번만 사용합니다.
+chat_ids = list(
+    dict.fromkeys(
+        chat_id.strip()
+        for chat_id in chat_ids_raw.split(",")
+        if chat_id.strip()
+    )
+)
+
+# 서울 위도와 경도
 lat = 37.5665
 lon = 126.9780
 
+
 # ---------------------------------------------------------
-# [대기 기능] 목표 시간까지 기다리는 함수
+# 로그 출력
+# ---------------------------------------------------------
+def log(message):
+    # 오류 메시지에 토큰이 포함되더라도 로그에서는 가립니다.
+    text = str(message)
+
+    if bot_token:
+        text = text.replace(bot_token, "[TOKEN_HIDDEN]")
+
+    print(text, flush=True)
+
+
+# ---------------------------------------------------------
+# 필수 설정 확인
+# ---------------------------------------------------------
+def validate_settings():
+    if not bot_token:
+        raise RuntimeError(
+            "TELEGRAM_TOKEN이 없습니다. "
+            "GitHub 저장소의 Secrets 설정을 확인하세요."
+        )
+
+    if not chat_ids:
+        raise RuntimeError(
+            "CHAT_ID가 없습니다. "
+            "GitHub 저장소의 Secrets 설정을 확인하세요."
+        )
+
+
+# ---------------------------------------------------------
+# 한국 시간 기준 목표 시각까지 대기
 # ---------------------------------------------------------
 def wait_until_target_time(target_hour, target_minute):
-    # 한국 시간(KST) 기준
-    kst = timezone(timedelta(hours=9))
-    now = datetime.now(kst)
-    
-    # 오늘의 목표 시간 (아침 6시 30분 00초)
-    target_time = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-    
-    # 현재 시간이 목표 시간보다 전이면 (예: 6시 05분 -> 6시 30분까지 대기)
+    now = datetime.now(KST)
+
+    target_time = now.replace(
+        hour=target_hour,
+        minute=target_minute,
+        second=0,
+        microsecond=0,
+    )
+
+    log(f"🕒 현재 한국 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
     if now < target_time:
         wait_seconds = (target_time - now).total_seconds()
-        print(f"⏰ 현재 시간(KST): {now.strftime('%H:%M:%S')}")
-        print(f"🎯 목표 시간(KST): {target_time.strftime('%H:%M:%S')}")
-        print(f"⏳ 약 {wait_seconds / 60:.1f}분 동안 대기합니다...")
-        
+
+        log(f"🎯 목표 시간: {target_time.strftime('%H:%M:%S')}")
+        log(f"⏳ 약 {wait_seconds / 60:.1f}분 동안 대기합니다.")
+
         time.sleep(wait_seconds)
-        print("🚀 대기 종료! 메시지를 전송합니다.")
+
+        log("🚀 대기 종료! 날씨 정보를 가져옵니다.")
     else:
-        print("⚠️ 이미 목표 시간이 지났습니다. 즉시 실행합니다.")
+        log("⚠️ 이미 목표 시간이 지났습니다. 즉시 실행합니다.")
+
 
 # ---------------------------------------------------------
-# 날씨 및 메시지 로직
+# 날씨 정보 가져오기
+# 통신 실패 또는 서버 오류 시 최대 4회 시도
 # ---------------------------------------------------------
 def get_weather():
-    # Open-Meteo (무료, 키 불필요)
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul"
-    response = requests.get(url)
-    data = response.json()
-    
-    current = data['current_weather']
-    temp_now = current['temperature']
-    w_code = current['weathercode']
-    
-    daily = data['daily']
-    temp_max = daily['temperature_2m_max'][0]
-    temp_min = daily['temperature_2m_min'][0]
-    
-    return temp_now, temp_min, temp_max, w_code
+    url = "https://api.open-meteo.com/v1/forecast"
 
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current_weather": "true",
+        "daily": "temperature_2m_max,temperature_2m_min",
+        "timezone": "Asia/Seoul",
+        "forecast_days": 1,
+    }
+
+    max_attempts = 4
+    retry_delays = [10, 20, 40]
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            log(f"🌤 날씨 정보 요청 중... ({attempt}/{max_attempts})")
+
+            response = requests.get(
+                url,
+                params=params,
+                timeout=(10, 30),
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("error"):
+                raise ValueError(
+                    f"날씨 API 오류: {data.get('reason', '원인 미상')}"
+                )
+
+            current = data["current_weather"]
+            daily = data["daily"]
+
+            temp_now = current["temperature"]
+            w_code = current["weathercode"]
+            temp_min = daily["temperature_2m_min"][0]
+            temp_max = daily["temperature_2m_max"][0]
+
+            if any(
+                value is None
+                for value in (temp_now, temp_min, temp_max, w_code)
+            ):
+                raise ValueError("날씨 응답에 누락된 값이 있습니다.")
+
+            log("✅ 날씨 정보 수신 완료")
+
+            return temp_now, temp_min, temp_max, w_code
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code
+
+            # 일반적인 요청 오류는 재시도하지 않습니다.
+            # 다만 HTTP 429(요청 제한)는 잠시 기다렸다 재시도합니다.
+            if status < 500 and status != 429:
+                raise RuntimeError(
+                    f"날씨 API HTTP {status} 오류입니다. "
+                    "요청 조건이나 API 이용 제한을 확인해야 합니다."
+                ) from None
+
+            error_message = f"날씨 API HTTP {status} 오류"
+
+        except (
+            requests.exceptions.RequestException,
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+        ) as e:
+            error_message = f"{type(e).__name__}: {e}"
+
+        log(f"⚠️ 날씨 조회 실패: {error_message}")
+
+        if attempt < max_attempts:
+            delay = retry_delays[attempt - 1]
+
+            log(f"🔄 {delay}초 후 다시 시도합니다.")
+            time.sleep(delay)
+        else:
+            raise RuntimeError(
+                f"날씨 정보를 {max_attempts}번 요청했지만 실패했습니다. "
+                f"마지막 오류: {error_message}"
+            ) from None
+
+
+# ---------------------------------------------------------
+# 날씨 상태 설명
+# ---------------------------------------------------------
 def get_weather_desc(w_code):
-    if w_code == 0: return "맑음 ☀️"
-    elif 1 <= w_code <= 3: return "구름 조금/흐림 ☁️"
-    elif 45 <= w_code <= 48: return "안개 🌫️"
-    elif 51 <= w_code <= 67: return "비/이슬비 🌧️"
-    elif 71 <= w_code <= 77: return "눈 ❄️"
-    elif 80 <= w_code <= 82: return "소나기 ☔"
-    elif 85 <= w_code <= 86: return "눈보라 ☃️"
-    elif 95 <= w_code <= 99: return "뇌우(천둥번개) ⚡"
-    else: return "정보 없음"
+    if w_code == 0:
+        return "맑음 ☀️"
+    elif w_code in (1, 2, 3):
+        return "구름 조금/흐림 ☁️"
+    elif w_code in (45, 48):
+        return "안개 🌫️"
+    elif w_code in (51, 53, 55, 56, 57, 61, 63, 65, 66, 67):
+        return "비/이슬비 🌧️"
+    elif w_code in (71, 73, 75, 77):
+        return "눈 ❄️"
+    elif w_code in (80, 81, 82):
+        return "소나기 ☔"
+    elif w_code in (85, 86):
+        return "눈 소나기 ☃️"
+    elif w_code in (95, 96, 99):
+        return "뇌우(천둥번개) ⚡"
+    else:
+        return "정보 없음"
 
+
+# ---------------------------------------------------------
+# 현재 기온 기준 옷차림 추천
+# ---------------------------------------------------------
 def get_outfit(temp):
     if temp >= 30:
         return "🔥 찜통더위! 민소매, 반바지, 린넨 옷 추천. 손풍기 필수!"
-    elif 21 <= temp < 30:
+    elif temp >= 21:
         return "☀️ 덥습니다. 반팔, 얇은 셔츠, 반바지 추천."
-    elif 16 <= temp < 21:
+    elif temp >= 16:
         return "🌤 활동하기 좋아요. 얇은 가디건, 긴팔, 면바지 추천."
-    elif 10 <= temp < 16:
+    elif temp >= 10:
         return "🍂 선선해요. 얇은 니트, 맨투맨, 가디건 챙기세요."
-    elif 5 <= temp < 10:
+    elif temp >= 5:
         return "🧥 쌀쌀합니다. 자켓, 야상, 스타킹, 도톰한 바지 입으세요."
-    elif -3 <= temp < 5:
+    elif temp >= -3:
         return "🥶 춥습니다. 코트, 히트텍, 니트, 레깅스 추천."
     else:
         return "❄️ 한파 주의! 패딩, 목도리, 장갑 등 최대한 따뜻하게 입으세요."
 
-def get_umbrella(w_code):
-    if w_code >= 50:
-        return "\n☂️ 비나 눈 소식이 있어요. 우산을 꼭 챙기세요!"
-    return "\n☀️ 우산은 필요 없을 것 같아요."
 
+# ---------------------------------------------------------
+# 현재 날씨 상태 기준 우산 안내
+# 하루 전체 강수 예보를 의미하는 것은 아닙니다.
+# ---------------------------------------------------------
+def get_umbrella(w_code):
+    precipitation_codes = {
+        51, 53, 55, 56, 57,
+        61, 63, 65, 66, 67,
+        71, 73, 75, 77,
+        80, 81, 82,
+        85, 86,
+        95, 96, 99,
+    }
+
+    if w_code in precipitation_codes:
+        return "☂️ 현재 비나 눈이 오는 날씨입니다. 우산을 챙기세요!"
+
+    return "🌂 현재 강수 상태는 아닙니다. 외출 전 시간대별 예보도 확인하세요."
+
+
+# ---------------------------------------------------------
+# 텔레그램 전송
+# 수신자가 여러 명이면 각각 전송합니다.
+# 중복 발송을 피하기 위해 전송을 자동 재시도하지 않습니다.
+# ---------------------------------------------------------
 def send_telegram(message):
-    for chat_id in chat_ids:
-        clean_id = chat_id.strip()
-        if not clean_id: continue
-        
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {
-            'chat_id': clean_id,
-            'text': message
-        }
-        requests.post(url, json=payload)
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    failed_count = 0
+
+    for index, chat_id in enumerate(chat_ids, start=1):
+        try:
+            log(f"📨 텔레그램 전송 중... ({index}/{len(chat_ids)})")
+
+            response = requests.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                },
+                timeout=(10, 30),
+            )
+
+            response.raise_for_status()
+            result = response.json()
+
+            if not result.get("ok"):
+                raise RuntimeError(
+                    result.get("description", "텔레그램 전송 실패")
+                )
+
+            log(f"✅ 텔레그램 전송 성공 ({index}/{len(chat_ids)})")
+
+        except (
+            requests.exceptions.RequestException,
+            ValueError,
+            RuntimeError,
+        ) as e:
+            failed_count += 1
+
+            log(
+                f"❌ 텔레그램 전송 실패 또는 결과 확인 불가 "
+                f"({index}/{len(chat_ids)}): {e}"
+            )
+
+    if failed_count:
+        raise RuntimeError(
+            f"수신 대상 {len(chat_ids)}곳 중 "
+            f"{failed_count}곳의 전송이 실패했거나 확인되지 않았습니다. "
+            "응답만 받지 못한 경우 실제로는 전송됐을 수 있습니다."
+        )
+
+
+# ---------------------------------------------------------
+# 실행
+# ---------------------------------------------------------
+def main():
+    validate_settings()
+
+    # 한국 시간 오전 6시 30분 전이면 기다립니다.
+    # 이미 지난 경우 즉시 실행합니다.
+    wait_until_target_time(6, 30)
+
+    temp_now, temp_min, temp_max, w_code = get_weather()
+
+    desc = get_weather_desc(w_code)
+    outfit = get_outfit(temp_now)
+    umbrella = get_umbrella(w_code)
+
+    today_date = datetime.now(KST).strftime("%m월 %d일")
+
+    message = (
+        f"[{today_date} 아침 날씨 알림]\n\n"
+        f"📍 서울 현재: {temp_now}°C\n"
+        f"📉 최저: {temp_min}°C / 📈 최고: {temp_max}°C\n"
+        f"☁️ 현재 날씨: {desc}\n\n"
+        f"👗 옷차림 추천:\n{outfit}\n\n"
+        f"{umbrella}"
+    )
+
+    send_telegram(message)
+
+    log("🎉 모든 수신자에게 메시지 전송 완료")
+
 
 if __name__ == "__main__":
     try:
-        # 1. 6시 30분이 될 때까지 대기
-        wait_until_target_time(6, 30)
-
-        # 2. 날씨 정보 가져오기
-        temp_now, temp_min, temp_max, w_code = get_weather()
-        desc = get_weather_desc(w_code)
-        outfit = get_outfit(temp_now)
-        umbrella = get_umbrella(w_code)
-        
-        # 3. 메시지 만들기
-        today_date = datetime.now(timezone(timedelta(hours=9))).strftime("%m월 %d일")
-        
-        message = f"[{today_date} 아침 날씨 알림]\n\n"
-        message += f"📍 서울 현재: {temp_now}°C\n"
-        message += f"📉 최저: {temp_min}°C / 📈 최고: {temp_max}°C\n"
-        message += f"☁️ 날씨 상태: {desc}\n\n"
-        message += f"👗 옷차림 추천:\n{outfit}\n"
-        message += f"{umbrella}"
-        
-        # 4. 전송
-        send_telegram(message)
-        print("메시지 전송 완료")
-        
+        main()
     except Exception as e:
-        print(f"❌ 에러 발생: {e}")
-        exit(1)
+        log(f"❌ 실행 실패: {e}")
+        sys.exit(1)
